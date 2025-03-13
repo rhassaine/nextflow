@@ -17,6 +17,8 @@
 
 package nextflow.data.cid
 
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import nextflow.util.TestOnly
 
 import java.nio.file.Files
@@ -69,6 +71,23 @@ class DefaultCidStore implements CidStore {
         log.debug("File for key $key not found")
         return null
     }
+
+    @Override
+    void annotate(String key, Map annotations){
+        final object = load(key)
+        if ( object ){
+            final slurper = new JsonSlurper()
+            def cidObject = slurper.parse(object.toString().toCharArray()) as Map
+            if (cidObject.annotations)
+                cidObject.annotations = cidObject.annotations as Map + annotations
+            else
+                cidObject.annotations = annotations
+            save(key, JsonOutput.prettyPrint(JsonOutput.toJson(cidObject)))
+        } else {
+            log.warn("Trying to annotate a non-existing key")
+        }
+    }
+
 
     @Override
     Path getPath(){ location }

@@ -50,6 +50,13 @@ interface CidStore {
     Object load(String key)
 
     /**
+     * Annotate entry with extra key, value metadata
+     * @param key
+     * @param annotations
+     */
+    void annotate(String key, Map annotations)
+
+    /**
      * Get the CID store location path.
      * @return CID store location path.
      */
