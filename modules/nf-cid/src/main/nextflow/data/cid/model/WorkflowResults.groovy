@@ -31,5 +31,5 @@ class WorkflowResults {
     DataType type
     String run
     Map<String, Object> outputs
-    List<String> publishedData
+    List<String> publishedFiles
 }
