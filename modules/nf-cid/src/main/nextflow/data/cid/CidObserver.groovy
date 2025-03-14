@@ -290,9 +290,10 @@ class CidObserver implements TraceObserver {
                 sourceReference,
                 attrs.size(),
                 attrs.creationTime().toMillis(),
-                attrs.lastModifiedTime().toMillis())
+                attrs.lastModifiedTime().toMillis(),
+                annotations)
             store.save(key, JsonOutput.prettyPrint(JsonOutput.toJson(value)))
-            workflowResults.publishedData.add("${CID_PROT}${key}".toString())
+            workflowResults.publishedFiles.add("${CID_PROT}${key}".toString())
         } catch (Throwable e) {
             log.warn("Exception storing published file $destination for workflow ${executionHash}.", e)
         }
@@ -354,10 +355,8 @@ class CidObserver implements TraceObserver {
     }
 
     @Override
-    void onFileAnnotation(Path destination, Map annotations){
-        final rel = getWorkflowRelative(destination)
-        final key = "$executionHash/${rel}"
-        store.annotate(key, annotations)
+    void onFilePublish(Path destination, Path source, Map annotations){
+        storePublishedFile( destination, source, annotations)
     }
 
     protected String getWorkflowRelative(Path path){

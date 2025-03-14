@@ -373,7 +373,7 @@ class CidObserverTest extends Specification {
         then: 'Check history file is updated and Workflow Result is written in the cid store'
             def expectedString3 =  '{"type":"WorkflowResults",' +
                 '"run":"cid://' + observer.executionHash +'",' +
-                '"outputs": {}, "publishedData": [ ' +
+                '"outputs": {}, "publishedFiles": [ ' +
                 '"cid://'+ observer.executionHash + '/foo/file.bam",' +
                 '"cid://'+ observer.executionHash + '/foo/file2.bam" ]}'
             def finalCid = store.getHistoryLog().getRecord(uniqueId).resultsCid.substring(CID_PROT.size())
