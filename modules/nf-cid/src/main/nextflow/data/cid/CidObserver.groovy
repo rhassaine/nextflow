@@ -84,7 +84,7 @@ class CidObserver implements TraceObserver {
         this.executionHash = storeWorkflowRun()
         workflowResults = new WorkflowResults(
             DataType.WorkflowResults,
-            "$CID_PROT${executionHash}",
+            System.currentTimeMillis(),
             new HashMap<String, Object>(),
             new ArrayList<String>(),
         )
@@ -95,9 +95,9 @@ class CidObserver implements TraceObserver {
     void onFlowComplete(){
         if (this.workflowResults){
             final content = JsonOutput.prettyPrint(JsonOutput.toJson(workflowResults))
-            final wfResultsHash = CacheHelper.hasher(content).hash().toString()
-            this.store.save(wfResultsHash, content)
-            this.store.getHistoryLog().updateResultsCid(session.uniqueId, "${CID_PROT}${wfResultsHash}")
+            workflowResults.creationTime = System.currentTimeMillis()
+            this.store.save("${this.executionHash}/outputs", content)
+            this.store.getHistoryLog().updateResultsCid(session.uniqueId, "${CID_PROT}${executionHash}/outputs")
         }
     }
 
@@ -279,7 +279,7 @@ class CidObserver implements TraceObserver {
                 CacheHelper.HashMode.DEFAULT().toString().toLowerCase()
             )
             final rel = getWorkflowRelative(destination)
-            final key = "$executionHash/${rel}"
+            final key = "$executionHash/outputs/${rel}"
 
             final sourceReference = source ? getSourceReference(source) : "${CID_PROT}${executionHash}".toString()
             final attrs = readAttributes(destination)
@@ -321,25 +321,13 @@ class CidObserver implements TraceObserver {
 
     @Override
     void onWorkflowPublish(String name, Object value){
-        synchronized (workflowResults.outputs) {
-            try {
-                def output = workflowResults.outputs.get(name) as List
-                if (output) {
-                    output.add(convertPathsToCidReferences(value))
-                } else {
-                    output = [convertPathsToCidReferences(value)]
-                }
-                workflowResults.outputs.put(name, output)
-            } catch (Throwable e) {
-                log.warn("Exception storing CID output $name for workflow ${executionHash}.", e)
-            }
-        }
+        workflowResults.outputs.put(name,convertPathsToCidReferences(value))
     }
 
     private Object convertPathsToCidReferences(Object value){
         if( value instanceof Path ) {
             final rel = getWorkflowRelative(value)
-            return rel ? "${CID_PROT}${executionHash}/${rel}".toString() : value
+            return rel ? "${CID_PROT}${executionHash}/outputs/${rel}".toString() : value
         }
 
         if( value instanceof Collection ) {
