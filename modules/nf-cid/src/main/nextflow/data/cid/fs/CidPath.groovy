@@ -21,6 +21,7 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.util.logging.Slf4j
 import nextflow.data.cid.model.DataType
+import nextflow.data.cid.model.WorkflowResults
 import nextflow.file.RealPathAware
 import nextflow.util.CacheHelper
 import nextflow.util.TestOnly
@@ -128,14 +129,17 @@ class CidPath implements Path, RealPathAware {
                     throw new FileNotFoundException("Target path $realPath for $filePath does not exists.")
                 return realPath
             }
-            if( type == DataType.WorkflowResults && resultsAsPath ){
-                final results = cidObject.outputs as Map
-                final creationTime = cidObject.creationTime as long
+            if( resultsAsPath ){
+                def results = cidObject
+                if( type == DataType.WorkflowResults )  {
+                    results = cidObject.outputs as Map
+                }
+                final creationTime = cidObject.creationTime ? cidObject.creationTime as Long : System.currentTimeMillis()
                 if( results ) {
                     if( childs && childs.size() > 0 ) {
                         final output = results.navigate(childs.join('.'))
                         if( output ){
-                            return new CidResultsPath(JsonOutput.prettyPrint(JsonOutput.toJson(results)), creationTime, fs, filePath, childs)
+                            return new CidResultsPath(JsonOutput.prettyPrint(JsonOutput.toJson(output)), creationTime, fs, filePath, childs)
                         }
                     }
                     return new CidResultsPath(JsonOutput.prettyPrint(JsonOutput.toJson(results)), creationTime, fs, filePath, childs)
