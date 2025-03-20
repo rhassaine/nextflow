@@ -1,0 +1,11 @@
+#
+# run normal mode
+#
+echo First run
+$NXF_RUN --save_intermeds | tee stdout
+
+# TODO: missing required param
+
+# TODO: overwrite script param from config profile
+
+# TODO: invalid param
