@@ -66,6 +66,9 @@ class GoogleBatchMachineTypeSelector {
             // AMD
             't2d': 1.0,   // AMD EPYC Milan ~2.7 Ghz
             'n2d': 1.0,   // AMD EPYC Milan ~2.7 Ghz
+
+            // ARM 
+            'c4a': 1.0, // Google Axion ~2.6-2.8 Ghz https://gcloud-compute.com/c4a-standard-4.html 
     ]
 
     /*
@@ -75,7 +78,7 @@ class GoogleBatchMachineTypeSelector {
      */
     private static final List<String> DEFAULT_FAMILIES_FOR_FUSION = ['n1-*', 'n2-*', 'n2d-*', 'c2-*', 'c2d-*', 'm3-*']
 
-    private static final List<String> DEFAULT_FAMILIES = ['n1-*', 'n2-*', 'n2d-*', 'c2-*', 'c2d-*', 'm1-*', 'm2-*', 'm3-*', 'e2-*']
+    private static final List<String> DEFAULT_FAMILIES = ['n1-*', 'n2-*', 'n2d-*', 'c2-*', 'c2d-*', 'm1-*', 'm2-*', 'm3-*', 'e2-*', 'c4a-*']
 
     /*
      * Accelerator optimized families. See: https://cloud.google.com/compute/docs/accelerator-optimized-machines
@@ -259,6 +262,20 @@ class GoogleBatchMachineTypeSelector {
             machineType.family == "a3" ||
             machineType.type.startsWith("a2-ultragpu-") )
             return new MemoryUnit( 0 )
+
+        // Include C4A machine types, which have local SSDs attached
+        if( machineType.family == "c4a" ) {
+            if( machineType.type == 'c4a-standard-2' || machineType.type == 'c4a-standard-4' ||
+                machineType.type == 'c4a-standard-8' || machineType.type == 'c4a-standard-16' ||
+                machineType.type == 'c4a-standard-32' )
+                return findFirstValidSize(requested, [1])
+            if( machineType.type == 'c4a-standard-24' )
+                return findFirstValidSize(requested, [2])
+            if( machineType.type == 'c4a-standard-48' )
+                return findFirstValidSize(requested, [4])
+            if( machineType.type == 'c4a-standard-96' )
+                return findFirstValidSize(requested, [8])
+        } 
 
         // For other special families, the user must provide a valid size. If a family does not
         // support local disks, then Google Batch shall return an appropriate error.
