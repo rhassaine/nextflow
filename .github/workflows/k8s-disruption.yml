@@ -1,0 +1,93 @@
+# Reproduces Kubernetes pod disruptions on kind and checks how Nextflow handles them with
+# the nf-core error strategy, for upstream master and for the branch of #6919.
+# Each job disrupts only the first attempt of a task; the summary shows whether the task
+# was retried, and by which path (automatic retry or errorStrategy).
+name: K8s disruption (nf-core errorStrategy)
+
+on:
+  push:
+    branches: [ k8s-disruption-ci ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nfcore:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: upstream master
+            repository: nextflow-io/nextflow
+            ref: master
+          - name: "PR #6919"
+            repository: rhassaine/nextflow
+            ref: k8s-failure-classification
+    steps:
+      - name: Checkout Nextflow (${{ matrix.name }})
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ matrix.repository }}
+          ref: ${{ matrix.ref }}
+
+      - name: Checkout the validation script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: .ci-scripts
+
+      - name: Copy the validation script into the Nextflow checkout
+        run: |
+          mkdir -p validation
+          cp -r .ci-scripts/validation/k8s-disruption validation/
+          rm -rf .ci-scripts
+          echo "Nextflow commit: $(git log -1 --format='%h %s')" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          java-version: 21
+          distribution: corretto
+
+      - name: Install kind
+        run: |
+          curl -fsSLo kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
+          chmod +x kind && sudo mv kind /usr/local/bin/kind
+          kind version
+
+      - name: Build Nextflow
+        run: make compile
+
+      - name: Create the kind cluster
+        working-directory: validation/k8s-disruption
+        run: bash run.sh --yes kind-up
+
+      - name: Run the nf-core errorStrategy scenarios
+        working-directory: validation/k8s-disruption
+        run: bash run.sh --context kind-nf-k8s-disruption --yes nfcore
+
+      - name: Summary
+        if: always()
+        working-directory: validation/k8s-disruption
+        run: |
+          for f in captures/nfcore/*/summary.tsv; do
+            [ -f "$f" ] || continue
+            {
+              echo "### ${{ matrix.name }}"
+              echo
+              head -1 "$f" | awk -F'\t' '{ s="|"; for(i=1;i<=NF;i++) s=s" "$i" |"; print s }'
+              head -1 "$f" | awk -F'\t' '{ s="|"; for(i=1;i<=NF;i++) s=s" --- |"; print s }'
+              tail -n +2 "$f" | awk -F'\t' '{ s="|"; for(i=1;i<=NF;i++) s=s" "$i" |"; print s }'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Upload the logs and captures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: k8s-disruption-${{ matrix.ref }}
+          path: validation/k8s-disruption/captures/
+          retention-days: 30
