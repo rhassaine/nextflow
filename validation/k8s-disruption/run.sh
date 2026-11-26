@@ -681,9 +681,13 @@ $pp"
             path=none
             grep -qE 'NOTE: .*-- Execution is retried \([0-9]+\)' "$dir/nextflow.log" && path=errorStrategy
             grep -qE 'NOTE: .*-- Execution is retried$' "$dir/nextflow.log" && path=automatic
-            seen_exit=$(grep -m1 'Task completed > TaskHandler' "$dir/nextflow.log" | sed -nE 's/.*exit: ([^;]*);.*/\1/p')
-            seen_error=$(grep -m1 'Task completed > TaskHandler' "$dir/nextflow.log" | sed -nE 's/.*error: ([^;]*);.*/\1/p' | cut -c1-160)
-            subs=$(grep -c 'Submitted process >' "$dir/nextflow.log" || true)
+            # first failure as seen by Nextflow: the task handler line when logged, otherwise the
+            # error report (e.g. when the task status check fails before the task is completed)
+            seen_exit=$( { grep -m1 'Task completed > TaskHandler' "$dir/nextflow.log" | sed -nE 's/.*exit: ([^;]*);.*/\1/p'; } 2>/dev/null || true)
+            seen_error=$( { grep -m1 'Task completed > TaskHandler' "$dir/nextflow.log" | sed -nE 's/.*error: ([^;]*);.*/\1/p' | cut -c1-160; } 2>/dev/null || true)
+            [[ -n $seen_exit ]] || seen_exit=$(awk '/^Command exit status:$/ { getline; gsub(/^ +/, ""); print; exit }' "$dir/stdout.log" 2>/dev/null || true)
+            [[ -n $seen_error ]] || seen_error=$(awk '/^Caused by:$/ { getline; gsub(/^ +/, ""); print substr($0, 1, 160); exit }' "$dir/stdout.log" 2>/dev/null || true)
+            subs=$(grep -c 'Submitted process >' "$dir/nextflow.log" 2>/dev/null || true)
             if $hung; then outcome="hung (killed after ${NFCORE_TIMEOUT}s)"; elif [[ $rc == 0 ]]; then outcome=recovered; else outcome="failed (exit $rc)"; fi
             printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sc" "$mode" "$outcome" "$path" "${seen_exit:--}" "$subs" "${seen_error:--}" \
                 | sed "s/$NODE/node-1/g" | tee -a "$summary" >&2
