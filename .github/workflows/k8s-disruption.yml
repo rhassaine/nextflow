@@ -1,7 +1,8 @@
 # Reproduces Kubernetes pod disruptions on kind and checks how Nextflow handles them with
-# the nf-core error strategy, for upstream master and for the branch of #6919.
-# Each job disrupts only the first attempt of a task; the summary shows whether the task
-# was retried, and by which path (automatic retry or errorStrategy).
+# the nf-core error strategy, for upstream master, the branch of #6919 and the prototype in
+# which the K8s Job replaces the disrupted pods. Each scenario disrupts only the first pod of a
+# task, except `repeat-eviction` that evicts it 3 times with `maxRetries 1`; the summary shows
+# whether the task was retried, by which path, and how many retries Nextflow made.
 name: K8s disruption (nf-core errorStrategy)
 
 on:
@@ -16,7 +17,7 @@ jobs:
   nfcore:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
@@ -27,6 +28,9 @@ jobs:
           - name: "PR #6919"
             repository: rhassaine/nextflow
             ref: k8s-failure-classification
+          - name: "prototype: Job replaces disrupted pods"
+            repository: rhassaine/nextflow
+            ref: k8s-infra-retries
     steps:
       - name: Checkout Nextflow (${{ matrix.name }})
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

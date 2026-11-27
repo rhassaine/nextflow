@@ -604,11 +604,13 @@ run_e2e() {
 #
 # nf-core error strategy: are disrupted tasks retried by `errorStrategy` on exit code alone?
 #
-NFCORE_SCENARIOS="api-eviction preemption taint node-shutdown node-delete oom"
+NFCORE_SCENARIOS="api-eviction preemption taint node-shutdown node-delete oom repeat-eviction"
+# number of times the `repeat-eviction` scenario evicts the task pod, more than `maxRetries`
+REPEAT_EVICTIONS=3
 NFCORE_TIMEOUT=900
 
 run_nfcore() {
-    local sc mode dir cfg nxf pid pod uid rc start i hung path seen_exit seen_error subs outcome build summary
+    local sc mode dir cfg nxf pid pod uid rc start i hung path seen_exit seen_error subs outcome build summary n done_uids disrupted retries
     [[ $# -gt 0 ]] || set -- $NFCORE_SCENARIOS
     local ctx=${CTX:-$(kubectl config current-context)}
     [[ $ctx == kind-* ]] || die "nfcore runs on kind only (the task work dir must be shared with the host)"
@@ -626,7 +628,7 @@ $pp"
     ensure_base
     e2e_storage
     summary="$OUT/nfcore/$build/summary.tsv"
-    $DRY || { mkdir -p "$(dirname "$summary")"; printf 'scenario\tmode\toutcome\tretried_by\texit_seen\tsubmissions\tfirst_error\n' > "$summary"; }
+    $DRY || { mkdir -p "$(dirname "$summary")"; printf 'scenario\tmode\toutcome\tretried_by\tdisruptions\tnf_retries\texit_seen\tsubmissions\tfirst_error\n' > "$summary"; }
     for sc in "$@"; do
         for mode in $MODES; do
             dir="$OUT/nfcore/$build/$sc/$mode"
@@ -645,19 +647,26 @@ $pp"
                 --scenario "$sc" --sleep 45 -work-dir "$KIND_WORK/work" > "$dir/stdout.log" 2>&1 ) &
             pid=$!
             start=$SECONDS; hung=false
+            disrupted=0
             if [[ $sc != oom ]]; then
-                # disrupt only the first attempt: a retry, by any means, then completes
-                pod=""; uid=""
-                while kill -0 $pid 2>/dev/null; do
-                    read -r pod uid < <(kn get pods -l nextflow.io/app=nextflow -o json | jq -r \
-                        '.items[] | select(.status.phase=="Running" and .metadata.deletionTimestamp == null) | "\(.metadata.name) \(.metadata.uid)"' | head -1) || true
-                    [[ -n $uid ]] && break
-                    sleep 1
-                done
-                if [[ -n $pod ]]; then
+                # disrupt only the first pod (for `repeat-eviction` the first pods): a retry, by any means, then completes
+                n=1; [[ $sc == repeat-eviction ]] && n=$REPEAT_EVICTIONS
+                done_uids=" "
+                while (( disrupted < n )) && kill -0 $pid 2>/dev/null; do
+                    pod=""; uid=""
+                    while kill -0 $pid 2>/dev/null; do
+                        read -r pod uid < <(kn get pods -l nextflow.io/app=nextflow -o json | jq -r \
+                            '.items[] | select(.status.phase=="Running" and .metadata.deletionTimestamp == null) | "\(.metadata.name) \(.metadata.uid)"' | head -1) || true
+                        [[ -n $uid && $done_uids != *" $uid "* ]] && break
+                        pod=""; uid=""
+                        sleep 1
+                    done
+                    [[ -n $pod ]] || break
                     sleep 5
-                    log "disrupting the first attempt"
-                    trigger "$sc" pod "$pod"
+                    disrupted=$(( disrupted + 1 ))
+                    log "disrupting pod $disrupted of $n"
+                    trigger "$([[ $sc == repeat-eviction ]] && echo api-eviction || echo "$sc")" pod "$pod"
+                    done_uids+="$uid "
                     sleep 5; untaint
                     if [[ " $NODE_SCENARIOS " == *" $sc "* ]]; then
                         # wait until the disrupted pod is resolved, then bring the node back so a retry can run
@@ -668,7 +677,7 @@ $pp"
                         done
                         restore_kind_node "$sc"
                     fi
-                fi
+                done
             fi
             while kill -0 $pid 2>/dev/null; do
                 if (( SECONDS - start > NFCORE_TIMEOUT )); then hung=true; kill $pid 2>/dev/null || true; break; fi
@@ -687,9 +696,10 @@ $pp"
             seen_error=$( { grep -m1 'Task completed > TaskHandler' "$dir/nextflow.log" | sed -nE 's/.*error: ([^;]*);.*/\1/p' | cut -c1-160; } 2>/dev/null || true)
             [[ -n $seen_exit ]] || seen_exit=$(awk '/^Command exit status:$/ { getline; gsub(/^ +/, ""); print; exit }' "$dir/stdout.log" 2>/dev/null || true)
             [[ -n $seen_error ]] || seen_error=$(awk '/^Caused by:$/ { getline; gsub(/^ +/, ""); print substr($0, 1, 160); exit }' "$dir/stdout.log" 2>/dev/null || true)
-            subs=$(grep -c 'Submitted process >' "$dir/nextflow.log" 2>/dev/null || true)
+            subs=$(grep -cE '(Submitted|Re-submitted) process >' "$dir/nextflow.log" 2>/dev/null || true)
+            retries=$(grep -cE 'NOTE: .*-- Execution is retried' "$dir/nextflow.log" 2>/dev/null || true)
             if $hung; then outcome="hung (killed after ${NFCORE_TIMEOUT}s)"; elif [[ $rc == 0 ]]; then outcome=recovered; else outcome="failed (exit $rc)"; fi
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sc" "$mode" "$outcome" "$path" "${seen_exit:--}" "$subs" "${seen_error:--}" \
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$sc" "$mode" "$outcome" "$path" "$disrupted" "$retries" "${seen_exit:--}" "$subs" "${seen_error:--}" \
                 | sed "s/$NODE/node-1/g" | tee -a "$summary" >&2
         done
     done
