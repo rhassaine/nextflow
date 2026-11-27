@@ -413,6 +413,9 @@ EOF
         node-delete)
             # the Node object disappears (as when a cloud provider removes a VM): the pod
             # garbage collector fails and deletes the pods bound to it (DeletionByPodGC)
+            # on kind the kubelet would register the node again right away, usually before the pod
+            # garbage collector runs: stop it first, as when the VM is gone (restored by `docker restart`)
+            is_kind && act docker stop "$NODE" >/dev/null
             kact delete node "$NODE" --wait=false >/dev/null
             is_kind && return 0
             cat >&2 <<EOF
