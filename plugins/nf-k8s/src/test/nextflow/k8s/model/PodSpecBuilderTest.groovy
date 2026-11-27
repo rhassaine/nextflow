@@ -836,6 +836,40 @@ class PodSpecBuilderTest extends Specification {
         ]
     }
 
+    def 'should create job spec replacing the pods disrupted by the infrastructure' () {
+
+        when:
+        def job = new PodSpecBuilder()
+                .withPodName('foo')
+                .withImageName('busybox')
+                .withCommand(['echo', 'hello'])
+                .withInfraRetries(3)
+                .buildAsJob()
+
+        then:
+        job.spec.backoffLimit == 3
+        job.spec.podFailurePolicy == [
+            rules: [
+                [action: 'Count', onPodConditions: [[type: 'DisruptionTarget']]],
+                [action: 'FailJob', onExitCodes: [operator: 'NotIn', values: [0]]],
+            ]
+        ]
+        // the pod failure policy requires the `Never` restart policy
+        job.spec.template.spec.restartPolicy == 'Never'
+
+        when:
+        job = new PodSpecBuilder()
+                .withPodName('foo')
+                .withImageName('busybox')
+                .withCommand(['echo', 'hello'])
+                .withInfraRetries(0)
+                .buildAsJob()
+
+        then:
+        job.spec.backoffLimit == 0
+        !job.spec.containsKey('podFailurePolicy')
+    }
+
     def 'should create job spec with labels and annotations' () {
 
         when:

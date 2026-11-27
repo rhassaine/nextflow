@@ -140,7 +140,7 @@ class K8sConfig implements ConfigScope {
 
     @ConfigOption
     @Description("""
-        The maximum number of times a task is automatically retried when its pod is terminated by an infrastructure failure, such as a node preemption or shutdown (default: `5`). Once exceeded, the failure is handled by the `errorStrategy` directive. Set to `0` to disable the automatic retry. The automatic retries are counted as task failures, therefore they also count towards the `maxRetries` directive.
+        The maximum number of times a task is automatically retried when its pod is terminated by an infrastructure failure, such as a node preemption, eviction or shutdown (default: `5`). Once exceeded, the failure is handled by the `errorStrategy` directive. Set to `0` to disable the automatic retry. When the task is submitted as a Job, the pod is replaced by the Kubernetes Job controller, and the retries do not count towards the `maxRetries` directive.
     """)
     final int maxInfraRetries
 

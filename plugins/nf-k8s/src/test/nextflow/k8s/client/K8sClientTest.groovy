@@ -1279,6 +1279,76 @@ class K8sClientTest extends Specification {
         LISTED << [false, true]
     }
 
+    def 'should wait for the job to replace the disrupted pod' () {
+        given:
+        def JOB_STATUS_JSON = """
+        {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": { "name": "test-job" },
+            "spec": { "backoffLimit": 3 },
+            "status": $JOB_STATUS
+        }
+        """
+        def client = Spy(K8sClient)
+        final JOB_NAME = 'test-job'
+        final POD_NAME = 'test-job-abc12'
+        final ERROR = new NodeTerminationException("K8s pod '$POD_NAME' execution failed - disruption: PreemptionByScheduler")
+
+        when:
+        def state = null
+        def error = null
+        try { state = client.jobState(JOB_NAME) }
+        catch( Throwable t ) { error = t }
+        then:
+        1 * client.findPodNameForJob(JOB_NAME) >> POD_NAME
+        1 * client.podState(POD_NAME) >> { throw ERROR }
+        1 * client.jobStatus(JOB_NAME) >> new K8sResponseJson(JOB_STATUS_JSON)
+        and:
+        REPLACED ? state == [:] : error.is(ERROR)
+
+        where:
+        JOB_STATUS                                                                                  | REPLACED
+        // the pod is terminating, the job will replace it
+        '{"active": 1, "startTime": "2026-11-11T15:49:12Z"}'                                        | true
+        // the pod was counted as failed and the job did not fail, the replacement pod is not created yet
+        '{"failed": 1, "startTime": "2026-11-11T15:49:12Z"}'                                        | true
+        // the job has run out of attempts
+        '{"failed": 4, "startTime": "2026-11-11T15:49:12Z", "conditions": [{"type": "FailureTarget", "status": "True", "reason": "BackoffLimitExceeded"}]}' | false
+        '{"failed": 4, "startTime": "2026-11-11T15:49:12Z", "conditions": [{"type": "Failed", "status": "True", "reason": "BackoffLimitExceeded"}]}'        | false
+    }
+
+    def 'should wait for the job to replace the pod when the pod is gone' () {
+        given:
+        def JOB_STATUS_JSON = """
+        {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": { "name": "test-job" },
+            "spec": { "backoffLimit": 3 },
+            "status": $JOB_STATUS
+        }
+        """
+        def client = Spy(K8sClient)
+        final JOB_NAME = 'test-job'
+
+        when:
+        def state = null
+        def error = null
+        try { state = client.jobState(JOB_NAME) }
+        catch( Throwable t ) { error = t }
+        then:
+        1 * client.findPodNameForJob(JOB_NAME) >> null
+        1 * client.jobStatus(JOB_NAME) >> new K8sResponseJson(JOB_STATUS_JSON)
+        and:
+        REPLACED ? state == [:] : error instanceof ProcessFailedException
+
+        where:
+        JOB_STATUS                                                                                  | REPLACED
+        '{"active": 1, "failed": 1, "startTime": "2026-11-11T15:49:12Z"}'                           | true
+        '{"failed": 4, "startTime": "2026-11-11T15:49:12Z", "conditions": [{"type": "Failed", "status": "True", "reason": "BackoffLimitExceeded", "message": "Job has reached the specified backoff limit"}]}' | false
+    }
+
     def 'should re-read token from disk and retry on 401 when tokenPath is set' () {
 
         given:

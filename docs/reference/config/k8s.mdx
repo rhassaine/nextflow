@@ -90,9 +90,11 @@ The path where the workflow is launched and the user data is stored (default: `<
 
 <AddedInVersion version="26.12" />
 
-The maximum number of times a task is automatically retried when its pod is terminated by an infrastructure failure, such as a node preemption or shutdown (default: `5`). Once exceeded, the failure is handled by the `errorStrategy` directive. Set to `0` to disable the automatic retry.
+The maximum number of times a task is automatically retried when its pod is terminated by an infrastructure failure, such as a node preemption, eviction or shutdown (default: `5`). Once exceeded, the failure is handled by the `errorStrategy` directive. Set to `0` to disable the automatic retry.
 
-The limit is checked against all the failures of the task: the automatic retries are counted as task failures, therefore they also count towards the `maxRetries` directive.
+When the task is submitted as a Job (see `k8s.computeResourceType`), the disrupted pod is replaced by the Kubernetes Job controller, using the Job [pod failure policy](https://kubernetes.io/docs/concepts/workloads/controllers/job/#pod-failure-policy). The retries are not visible to the task, therefore they do not count towards the `maxRetries` directive and do not change `task.attempt`. Any other pod failure, such as an application error or an out of memory error, fails the Job and is handled by the `errorStrategy` directive. Requires Kubernetes 1.31 or later.
+
+When the task is submitted as a Pod, the task is retried by Nextflow, and the retries count towards the `maxRetries` directive.
 
 ##### `k8s.namespace`
 

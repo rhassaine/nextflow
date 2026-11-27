@@ -280,9 +280,16 @@ class K8sTaskHandler extends TaskHandler implements FusionAwareTask {
                 builder.withEnv(PodEnv.value(it.key, it.value))
         }
 
-        return useJobResource()
-            ? builder.buildAsJob()
-            : builder.build()
+        if( !useJobResource() )
+            return builder.build()
+
+        return builder
+            .withInfraRetries(maxInfraRetries())
+            .buildAsJob()
+    }
+
+    protected int maxInfraRetries() {
+        return k8sConfig.getMaxInfraRetries()
     }
 
     protected PodOptions getPodOptions() {
@@ -488,9 +495,13 @@ class K8sTaskHandler extends TaskHandler implements FusionAwareTask {
     }
 
     /**
-     * Infrastructure failures are retried automatically, regardless of the task error strategy,
-     * until the task failures reach the `k8s.maxInfraRetries` limit. Then they are
+     * Infrastructure failures are retried up to the `k8s.maxInfraRetries` limit, then they are
      * reported as a regular process failure, so that they are handled by the task error strategy.
+     *
+     * When the task is submitted as a K8s Job, the disrupted pod is replaced by the job controller
+     * itself (see {@link PodSpecBuilder#buildAsJob()}), therefore the failure is reported to nextflow
+     * only once the job has run out of attempts. Otherwise, the task is retried automatically by
+     * nextflow, regardless of the task error strategy.
      *
      * @param error The infrastructure failure error
      * @return The error to be assigned to the task
@@ -498,7 +509,12 @@ class K8sTaskHandler extends TaskHandler implements FusionAwareTask {
     protected Throwable infraFailureError(Throwable error) {
         if( error !instanceof ProcessRetryableException )
             return error
-        final max = k8sConfig.getMaxInfraRetries()
+        final max = maxInfraRetries()
+        if( useJobResource() ) {
+            if( max > 0 )
+                log.debug "[K8s] Max infrastructure retries ($max) exceeded for job: $podName"
+            return new ProcessException(error.message)
+        }
         if( task.failCount < max ) {
             // the task retry is logged without the failure cause, therefore report it here
             log.info "[K8s] Task `$task.name` failed because of an infrastructure issue and it will be retried (${task.failCount + 1} of $max) -- ${error.message}"

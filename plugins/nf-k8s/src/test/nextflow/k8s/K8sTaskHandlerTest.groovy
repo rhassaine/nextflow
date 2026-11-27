@@ -413,6 +413,7 @@ class K8sTaskHandlerTest extends Specification {
         _ * handler.fusionEnabled() >> false
         1 * handler.fixOwnership() >> false
         1 * handler.useJobResource() >> true
+        1 * handler.maxInfraRetries() >> 0
         1 * handler.entrypointOverride() >> true
         1 * handler.cpuLimitsEnabled() >> false
         1 * handler.getSyntheticPodName(task) >> 'nf-123'
@@ -911,6 +912,28 @@ class K8sTaskHandlerTest extends Specification {
         new K8sOutOfMemoryException('Pod out of memory')    | 5          | 5   | ProcessException
         // not an infrastructure failure, it's not affected by the limit
         new PodUnschedulableException('Pod unschedulable', new Exception()) | 5 | 5 | PodUnschedulableException
+    }
+
+    def 'should report infrastructure failures to the error strategy when the job ran out of attempts' () {
+        given:
+        def task = new TaskRun(name: 'foo', failCount: 0)
+        def handler = Spy(new K8sTaskHandler(task: task, podName: 'job-xyz'))
+        handler.getK8sConfig() >> new K8sConfig(maxInfraRetries: MAX)
+        handler.useJobResource() >> true
+
+        when:
+        def result = handler.infraFailureError(ERROR)
+        then:
+        result.class == EXPECTED
+        result.message == ERROR.message
+
+        where:
+        // the job controller already replaced the disrupted pods, nextflow does not retry them again
+        ERROR                                               | MAX | EXPECTED
+        new NodeTerminationException('Node preempted')      | 5   | ProcessException
+        new NodeTerminationException('Node preempted')      | 0   | ProcessException
+        new K8sOutOfCpuException('Pod out of cpu')          | 5   | ProcessException
+        new PodUnschedulableException('Pod unschedulable', new Exception()) | 5 | PodUnschedulableException
     }
 
     def 'should return container mounts' () {

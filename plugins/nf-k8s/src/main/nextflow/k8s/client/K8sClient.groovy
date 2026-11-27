@@ -432,24 +432,45 @@ class K8sClient {
             }
         }
 
+        // a job with a `backoffLimit` greater than zero replaces the pods disrupted by the infrastructure
+        // (see the job `podFailurePolicy`), therefore it has failed only once its status reports it.
+        // otherwise, the job cannot start a new pod and a pod disruption or failure is final
+        final backoffLimit = ((jobResp.spec as Map)?.backoffLimit ?: 0) as int
+        final jobFailed = backoffLimit > 0
+            ? isJobFailed(jobStatus)
+            : (nodeTermination != null || (jobStatus?.failed && (int)(jobStatus.failed) > 0))
+
+        if( !jobFailed ) {
+            if( nodeTermination )
+                log.warn1("[K8s] ${nodeTermination.message} -- the pod will be replaced by the job $jobName")
+            else
+                log.debug1("K8s Job $jobName does not have pod - Not yet scheduled?")
+            return Collections.emptyMap()
+        }
+
         // the pod was disrupted (e.g. preempted or evicted) and the job did not complete:
-        // the job status does not report the cause, therefore report the error raised for the pod.
-        // note: the job cannot start a new pod because its `backoffLimit` is zero
+        // the job status does not report the cause, therefore report the error raised for the pod
         if( nodeTermination )
             throw nodeTermination
 
-        if( jobStatus?.failed && (int)(jobStatus.failed) > 0 ) {
-            String message = 'unknown'
-            if( jobStatus.conditions instanceof List ) {
-                final allConditions = jobStatus.conditions as List<Map>
-                final cond = allConditions.find { cond -> cond.type == 'Failed' }
-                message = cond?.message
-            }
-            throw new ProcessFailedException("K8s Job $jobName execution failed: $message")
+        String message = 'unknown'
+        if( jobStatus.conditions instanceof List ) {
+            final allConditions = jobStatus.conditions as List<Map>
+            final cond = allConditions.find { cond -> cond.type == 'Failed' }
+            message = cond?.message
         }
+        throw new ProcessFailedException("K8s Job $jobName execution failed: $message")
+    }
 
-        log.debug1("K8s Job $jobName does not have pod - Not yet scheduled?")
-        return Collections.emptyMap()
+    /**
+     * @param jobStatus The job `status` object
+     * @return {@code true} when the job has failed, or it's going to fail once its pods are terminated
+     */
+    protected static boolean isJobFailed(Map jobStatus) {
+        if( !(jobStatus?.conditions instanceof List) )
+            return false
+        final allConditions = jobStatus.conditions as List<Map>
+        return allConditions.any { cond -> cond.type in ['Failed', 'FailureTarget'] && cond.status == 'True' }
     }
 
     /**

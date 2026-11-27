@@ -124,6 +124,8 @@ class PodSpecBuilder {
 
     Integer ttlSecondsAfterFinished
 
+    int infraRetries
+
     String runtimeClassName
 
     /**
@@ -323,6 +325,15 @@ class PodSpecBuilder {
 
     PodSpecBuilder withActiveDeadline(int seconds) {
         this.activeDeadlineSeconds = seconds
+        return this
+    }
+
+    /**
+     * The number of times the job replaces a pod disrupted by the infrastructure (e.g. preempted,
+     * evicted or terminated by a node shutdown), see {@link #buildAsJob()}
+     */
+    PodSpecBuilder withInfraRetries(int retries) {
+        this.infraRetries = retries
         return this
     }
 
@@ -597,12 +608,25 @@ class PodSpecBuilder {
     Map buildAsJob() {
         final pod = build()
         final spec = [
-            backoffLimit: 0,
+            backoffLimit: infraRetries > 0 ? infraRetries : 0,
             template: [
                 metadata: pod.metadata,
                 spec: pod.spec
             ]
         ]
+
+        // a pod disrupted by the infrastructure is replaced by the job controller up to `backoffLimit` times,
+        // while any other pod failure fails the job, so that it is handled by the task error strategy.
+        // the replacement is not visible to nextflow, therefore it does not count towards the task `maxRetries`.
+        // See https://kubernetes.io/docs/concepts/workloads/controllers/job/#pod-failure-policy
+        if( infraRetries > 0 ) {
+            spec.podFailurePolicy = [
+                rules: [
+                    [action: 'Count', onPodConditions: [[type: 'DisruptionTarget']]],
+                    [action: 'FailJob', onExitCodes: [operator: 'NotIn', values: [0]]],
+                ]
+            ]
+        }
 
         if( ttlSecondsAfterFinished != null )
             spec.ttlSecondsAfterFinished = ttlSecondsAfterFinished
